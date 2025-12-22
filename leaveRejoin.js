@@ -3,35 +3,59 @@ function randomMs(minMs, maxMs) {
 }
 
 function setupLeaveRejoin(bot) {
+  let leaveTimer = null
+  let jumpTimer = null
+  let jumpOffTimer = null
+  let stopped = false
+
+  function cleanup() {
+    stopped = true
+    if (leaveTimer) clearTimeout(leaveTimer)
+    if (jumpTimer) clearTimeout(jumpTimer)
+    if (jumpOffTimer) clearTimeout(jumpOffTimer)
+    leaveTimer = jumpTimer = jumpOffTimer = null
+  }
+
+  function scheduleNextJump() {
+    if (stopped || !bot.entity) return
+
+    // jump quickly
+    bot.setControlState('jump', true)
+    jumpOffTimer = setTimeout(() => {
+      bot.setControlState('jump', false)
+    }, 400)
+
+    // next jump 20s -> 5m
+    const nextJump = randomMs(20_000, 5 * 60 * 1000)
+    jumpTimer = setTimeout(scheduleNextJump, nextJump)
+  }
+
   bot.once('spawn', () => {
-    // 45 seconds → 10 minutes
+    cleanup() // safety: clear anything old
+
+    stopped = false
+
+    // stay connected 45s -> 10m
     const stayTime = randomMs(45_000, 10 * 60 * 1000)
-    console.log(`[AFK] Will leave in ${(stayTime / 1000).toFixed(0)} seconds`)
+    console.log(`[AFK] Will leave in ${Math.round(stayTime / 1000)} seconds`)
 
-    let jumping = true
+    scheduleNextJump()
 
-    // Jump loop
-    function jumpLoop() {
-      if (!jumping || !bot.entity) return
-
-      bot.setControlState('jump', true)
-      setTimeout(() => bot.setControlState('jump', false), 500)
-
-      // Next jump: 20 sec → 5 min
-      const nextJump = randomMs(20_000, 5 * 60 * 1000)
-      setTimeout(jumpLoop, nextJump)
-    }
-
-    // Start jumping
-    jumpLoop()
-
-    // Leave server
-    setTimeout(() => {
+    leaveTimer = setTimeout(() => {
+      if (stopped) return
       console.log('[AFK] Leaving server (timer)')
-      jumping = false
+      cleanup()
       bot.quit()
     }, stayTime)
   })
+
+  // IMPORTANT: stop timers when connection ends
+  bot.on('end', cleanup)
+  bot.on('kicked', cleanup)
+  bot.on('error', cleanup)
+
+  // optional: allow manual cleanup if you want
+  return cleanup
 }
 
 module.exports = setupLeaveRejoin
